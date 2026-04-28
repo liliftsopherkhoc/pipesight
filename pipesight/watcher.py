@@ -55,7 +55,16 @@ def watch(
         Defaults to printing via :func:`render_tracker`.
     max_iterations:
         Stop after this many poll cycles (useful for testing).
+
+    Raises
+    ------
+    FileNotFoundError
+        If *script_path* does not exist when ``watch`` is first called.
     """
+    resolved = str(Path(script_path).resolve())
+    if not os.path.isfile(resolved):
+        raise FileNotFoundError(f"[pipesight] Script not found: {script_path!r}")
+
     if on_update is None:
         on_update = lambda t: print(render_tracker(t))
 
@@ -65,11 +74,11 @@ def watch(
     print(f"[pipesight] Watching {script_path!r} (interval={interval}s) …")
     try:
         while True:
-            current_mtime = _mtime(script_path)
+            current_mtime = _mtime(resolved)
             if current_mtime != last_mtime:
                 last_mtime = current_mtime
                 try:
-                    tracker = _load_and_run(script_path)
+                    tracker = _load_and_run(resolved)
                     if tracker is not None:
                         on_update(tracker)
                     else:
