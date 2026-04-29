@@ -1,68 +1,106 @@
-"""Render profiling results to the terminal."""
+"""Render StepProfile results as a formatted CLI table."""
+
 from __future__ import annotations
 
 from typing import List
 
 from pipesight.profiler import StepProfile
+from pipesight.formatter import format_duration, format_rows
 from pipesight.renderer import _bar, _color_for_fraction
-from pipesight.formatter import format_duration
 
-_COL_NAME = 28
-_COL_DUR = 12
-_COL_MEM = 14
-_COL_CPU = 8
-_RESET = "\033[0m"
-_BOLD = "\033[1m"
-_DIM = "\033[2m"
+_ANSI_RESET = "\033[0m"
+_ANSI_RED = "\033[31m"
+_ANSI_YELLOW = "\033[33m"
+_ANSI_GREEN = "\033[32m"
+_ANSI_CYAN = "\033[36m"
+_ANSI_BOLD = "\033[1m"
 
-
-def _mem_color(delta_mb: float) -> str:
-    if delta_mb > 100:
-        return "\033[31m"  # red
-    if delta_mb > 20:
-        return "\033[33m"  # yellow
-    return "\033[32m"  # green
+_BAR_WIDTH = 20
 
 
-def render_profiles(profiles: List[StepProfile]) -> str:
-    """Return a formatted table string for the given step profiles."""
+def _mem_color(mb: float) -> str:
+    """Return ANSI color code based on memory usage in MB."""
+    if mb >= 100:
+        return _ANSI_RED
+    if mb >= 25:
+        return _ANSI_YELLOW
+    return _ANSI_GREEN
+
+
+def render_profiles(profiles: List[StepProfile], use_color: bool = True) -> str:
+    """Render a list of StepProfile objects as a formatted string.
+
+    Args:
+        profiles: List of StepProfile instances to render.
+        use_color: Whether to emit ANSI color codes.
+
+    Returns:
+        A multi-line string suitable for printing to a terminal.
+    """
     if not profiles:
-        return "No profile data available.\n"
+        return "No profile data available."
 
-    max_dur = max(p.duration_ms for p in profiles) or 1.0
+    max_duration = max((p.duration_ms for p in profiles), default=1.0) or 1.0
+    max_mem = max(
+        (p.memory_delta_mb for p in profiles if p.memory_delta_mb is not None),
+        default=0.0,
+    ) or 1.0
 
     header = (
-        f"{_BOLD}"
-        f"{'Step':<{_COL_NAME}}"
-        f"{'Duration':>{_COL_DUR}}"
-        f"{'Mem Δ (MB)':>{_COL_MEM}}"
-        f"{'CPU%':>{_COL_CPU}}"
-        f"{_RESET}"
+        f"{'Step':<24} {'Duration':>12} {'Bar':<{_BAR_WIDTH + 2}} "
+        f"{'ΔMem (MB)':>10} {'CPU %':>7} {'Rows':>10}"
     )
-    separator = "-" * (_COL_NAME + _COL_DUR + _COL_MEM + _COL_CPU)
-    lines = [header, separator]
+    divider = "-" * len(header)
+    lines = []
+
+    if use_color:
+        lines.append(f"{_ANSI_BOLD}{header}{_ANSI_RESET}")
+    else:
+        lines.append(header)
+    lines.append(divider)
 
     for p in profiles:
-        frac = p.duration_ms / max_dur
-        color = _color_for_fraction(frac)
+        fraction = p.duration_ms / max_duration
+        bar = _bar(fraction, width=_BAR_WIDTH)
+
         dur_str = format_duration(p.duration_ms)
-        bar = _bar(frac, width=10)
+        rows_str = format_rows(p.rows_out)
 
-        if p.memory_delta_mb is not None:
-            mem_col = _mem_color(p.memory_delta_mb)
-            mem_str = f"{mem_col}{p.memory_delta_mb:+.1f}{_RESET}"
+        mem_str = (
+            f"{p.memory_delta_mb:+.1f}"
+            if p.memory_delta_mb is not None
+            else "    n/a"
+        )
+        cpu_str = (
+            f"{p.cpu_percent:.1f}"
+            if p.cpu_percent is not None
+            else "  n/a"
+        )
+
+        if use_color:
+            dur_color = _color_for_fraction(fraction)
+            mem_color = (
+                _mem_color(abs(p.memory_delta_mb))
+                if p.memory_delta_mb is not None
+                else ""
+            )
+            line = (
+                f"{p.step_name:<24} "
+                f"{dur_color}{dur_str:>12}{_ANSI_RESET} "
+                f"[{_ANSI_CYAN}{bar}{_ANSI_RESET}] "
+                f"{mem_color}{mem_str:>10}{_ANSI_RESET} "
+                f"{cpu_str:>7} "
+                f"{rows_str:>10}"
+            )
         else:
-            mem_str = f"{_DIM}n/a{_RESET}"
+            line = (
+                f"{p.step_name:<24} {dur_str:>12} [{bar}] "
+                f"{mem_str:>10} {cpu_str:>7} {rows_str:>10}"
+            )
 
-        if p.cpu_percent is not None:
-            cpu_str = f"{p.cpu_percent:.1f}"
-        else:
-            cpu_str = f"{_DIM}n/a{_RESET}"
+        lines.append(line)
 
-        name_col = p.step_name[:_COL_NAME - 1].ljust(_COL_NAME)
-        dur_col = f"{color}{dur_str}{_RESET}".rjust(_COL_DUR + len(color) + len(_RESET))
-        lines.append(f"{name_col}{dur_col}{mem_str:>{_COL_MEM}}{cpu_str:>{_COL_CPU}}")
-        lines.append(f"  {bar}")
-
-    lines.append(separator)
-    return "\n".join(lines) + "\n"
+    lines.append(divider)
+    total_dur = sum(p.duration_ms for p in profiles)
+    lines.append(f"{'TOTAL':<24} {format_duration(total_dur):>12}")
+    return "\n".join(lines)
