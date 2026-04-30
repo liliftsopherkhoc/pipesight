@@ -69,6 +69,18 @@ def test_to_csv_error_field_empty_when_none():
     assert rows[0]["error"] == ""
 
 
+def test_to_csv_error_field_populated():
+    """Error message should appear in the CSV when a step has an error."""
+    tracker = PipelineTracker(name="err_pipe")
+    tracker.steps.append(
+        StepResult(name="load", duration_ms=10.0, rows_in=None, rows_out=0, error="FileNotFoundError")
+    )
+    raw = to_csv(tracker)
+    reader = csv.DictReader(io.StringIO(raw))
+    rows = list(reader)
+    assert rows[0]["error"] == "FileNotFoundError"
+
+
 def test_save_json(tmp_path):
     tracker = _make_tracker()
     out = tmp_path / "summary.json"
